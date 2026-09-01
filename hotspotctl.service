@@ -1,0 +1,21 @@
+[Unit]
+Description=hotspotctl - Linux 便携热点管理器 (NetworkManager + UFW)
+Documentation=file:///home/recluse/pro/hotspot-manager/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/recluse/pro/hotspot-manager
+ExecStart=/home/recluse/pro/hotspot-manager/target/release/hotspotctl on
+ExecStop=/home/recluse/pro/hotspot-manager/target/release/hotspotctl off
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=180
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

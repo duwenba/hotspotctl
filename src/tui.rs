@@ -583,7 +583,7 @@ impl App {
         lines.push(Line::from(vec![
             Span::styled(
                 pad("信号", 8),
-                Style::default().fg(DIM).add_modifier(Modifier::BOLD),
+                Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 sig,
@@ -591,7 +591,7 @@ impl App {
                     .fg(sig_color(s.signal))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(sig_num, Style::default().fg(DIM)),
+            Span::styled(sig_num, Style::default()),
         ]));
         lines.push(kv("上行", &tx, Some(OK)));
         lines.push(kv("下行", &rx, Some(OK)));

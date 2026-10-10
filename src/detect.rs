@@ -50,8 +50,13 @@ pub fn upstream_iface() -> String {
 }
 
 /// 找到 NM 中的 AP 模式连接名。
+/// 可能存在多个 AP 连接(如绑定在旧接口名上的残留连接), 优先选择
+/// connection.interface-name 与当前 wifi 接口一致(或未绑定接口)的连接,
+/// 避免激活时因 "mismatching interface name" 失败。
 pub fn find_ap_conn() -> Option<String> {
+    let wlan = wlan_iface();
     let p = run("nmcli", &["-g", "NAME,TYPE", "con", "show"]);
+    let mut fallback = None;
     for line in p.stdout.lines() {
         let mut it = line.splitn(2, ':');
         let name = it.next().unwrap_or("");
@@ -63,11 +68,24 @@ pub fn find_ap_conn() -> Option<String> {
             "nmcli",
             &["-g", "802-11-wireless.mode", "con", "show", name],
         );
-        if m.stdout.trim() == "ap" {
+        if m.stdout.trim() != "ap" {
+            continue;
+        }
+        let bound = run(
+            "nmcli",
+            &["-g", "connection.interface-name", "con", "show", name],
+        )
+        .stdout
+        .trim()
+        .to_string();
+        if bound.is_empty() || bound == wlan {
             return Some(name.to_string());
         }
+        if fallback.is_none() {
+            fallback = Some(name.to_string());
+        }
     }
-    None
+    fallback
 }
 
 /// (wlan接口, 状态, 连接名)

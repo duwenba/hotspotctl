@@ -127,6 +127,13 @@ pub fn do_on(ssid: Option<&str>, password: Option<&str>) -> bool {
     let up = detect::upstream_iface();
     let _ = fix_ufw(&wlan, &up);
 
+    // NM shared 模式依赖 dnsmasq 提供 DHCP/DNS, 缺失时激活会以
+    // "IP configuration could not be reserved" 之类晦涩错误失败, 提前拦截。
+    if !run("sh", &["-c", "command -v dnsmasq"]).ok() {
+        log::fail("未安装 dnsmasq (NetworkManager 热点模式必需), 请先安装: sudo pacman -S dnsmasq");
+        return false;
+    }
+
     let mut conn = detect::find_ap_conn();
     if conn.is_none() {
         let ssid = ssid.unwrap_or("CachyOS-Hotspot");
@@ -150,6 +157,26 @@ pub fn do_on(ssid: Option<&str>, password: Option<&str>) -> bool {
     };
 
     let p = run("nmcli", &["connection", "up", &conn]);
+    let p = if p.ok() {
+        p
+    } else if p.stderr.contains("mismatching interface name") {
+        // 连接绑定在旧接口名上(如接口改名/残留连接), 重绑到当前接口后重试。
+        log::warn("连接绑定的接口名与当前不符, 重新绑定后重试...");
+        let fix = [
+            "con",
+            "modify",
+            &conn,
+            "connection.interface-name",
+            &wlan,
+        ];
+        if run("nmcli", &fix).check(&fix).is_err() {
+            log::fail("重新绑定接口名失败");
+            return false;
+        }
+        run("nmcli", &["connection", "up", &conn])
+    } else {
+        p
+    };
     if p.ok() {
         let (ssid, _typ, ch) = detect::ap_info(&wlan);
         log::ok(&format!(

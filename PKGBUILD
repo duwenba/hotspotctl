@@ -14,6 +14,8 @@ changelog=
 source=()
 noextract=()
 validpgpkeys=()
+# 已在 Cargo.toml 里 strip, 不需要单独的 debug 包。
+options=(!debug)
 
 build() {
   # 无 source, 直接在当前源码树构建(复用已有 target 缓存)。

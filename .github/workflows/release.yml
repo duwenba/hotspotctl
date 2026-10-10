@@ -79,7 +79,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: arch-package
-          path: "*.pkg.tar.zst"
+          path: "hotspotctl-[0-9]*.pkg.tar.zst"
           if-no-files-found: error
 
   release:
@@ -99,17 +99,23 @@ jobs:
           sha256sum ./*.pkg.tar.zst | sed 's|\./||' > SHA256SUMS.arch
           cat SHA256SUMS SHA256SUMS.arch > ALL_SHA256SUMS
           cat ALL_SHA256SUMS
-      - name: Create release
+      - name: Create or update release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           cd dist
-          gh release create "${GITHUB_REF_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "hotspotctl ${GITHUB_REF_NAME}" \
-            --generate-notes \
-            hotspotctl-x86_64-linux \
-            hotspotctl.service \
-            ./*.pkg.tar.zst \
-            ALL_SHA256SUMS
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release 已存在, 仅覆盖上传产物"
+            gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber \
+              hotspotctl-x86_64-linux hotspotctl.service ./*.pkg.tar.zst ALL_SHA256SUMS
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "hotspotctl ${GITHUB_REF_NAME}" \
+              --generate-notes \
+              hotspotctl-x86_64-linux \
+              hotspotctl.service \
+              ./*.pkg.tar.zst \
+              ALL_SHA256SUMS
+          fi

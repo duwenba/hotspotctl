@@ -66,13 +66,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build package
+        # --nodeps: 容器里不安装 networkmanager/ufw/iw 等运行期依赖, 只构建包。
         run: |
           set -euo pipefail
           docker run --rm -v "$PWD":/src -w /src archlinux:base-devel bash -euo pipefail -c '
             pacman -Syu --noconfirm --needed base-devel rust
             useradd -m builder
             chown -R builder /src
-            su builder -c "makepkg -f --noconfirm"
+            su builder -c "makepkg -f --noconfirm --nodeps"
           '
           ls -l ./*.pkg.tar.zst
       - uses: actions/upload-artifact@v4

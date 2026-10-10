@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .venv/
 target
+pkg/
+*.pkg.tar.zst
+*.tar.zst

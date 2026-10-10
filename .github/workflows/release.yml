@@ -87,6 +87,10 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 才能列出所有 tag, 用于生成 changelog。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -99,23 +103,55 @@ jobs:
           sha256sum ./*.pkg.tar.zst | sed 's|\./||' > SHA256SUMS.arch
           cat SHA256SUMS SHA256SUMS.arch > ALL_SHA256SUMS
           cat ALL_SHA256SUMS
+      # 本项目直接往 main 上提交(不走 PR), GitHub 自动生成的 notes 基本是空的,
+      # 所以自己按 tag 区间生成 release notes。
+      - name: Build release notes
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          prev="$(git tag --list 'v*' --sort=-v:refname | grep -vx "$tag" | head -1 || true)"
+          {
+            if [ -n "$prev" ]; then
+              echo "## 变更 (${prev} → ${tag})"
+              echo
+              git log --no-merges --pretty='- %s (`%h`)' "${prev}..${tag}"
+              echo
+              echo "**完整变更**: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${prev}...${tag}"
+            else
+              echo "## 首个版本"
+            fi
+            echo
+            echo '## 安装'
+            echo
+            echo '```bash'
+            echo 'sha256sum -c ALL_SHA256SUMS'
+            echo 'pacman -U hotspotctl-*.pkg.tar.zst                        # Arch (含 systemd 单元)'
+            echo 'install -Dm755 hotspotctl-x86_64-linux ~/.local/bin/hotspotctl   # 其他发行版'
+            echo '```'
+            echo
+            echo '## ⚠️ AI 使用声明'
+            echo
+            echo '**本项目代码主要由 AI 生成，作者仅做集成与测试。不对正确性、安全性作任何担保；使用风险自负。**'
+            echo
+            echo '本工具会以 **root 权限修改系统状态**（`rfkill`、`/etc/sysctl.d/*.conf`、UFW 防火墙规则、NetworkManager 连接配置），'
+            echo '请先阅读仓库 README 中的完整声明与源码后再决定是否使用。'
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
       - name: Create or update release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          cd dist
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            echo "Release 已存在, 仅覆盖上传产物"
-            gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber \
-              hotspotctl-x86_64-linux hotspotctl.service ./*.pkg.tar.zst ALL_SHA256SUMS
+            echo "Release 已存在, 更新说明并覆盖上传产物"
+            gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+              --notes-file RELEASE_NOTES.md
           else
             gh release create "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" \
               --title "hotspotctl ${GITHUB_REF_NAME}" \
-              --generate-notes \
-              hotspotctl-x86_64-linux \
-              hotspotctl.service \
-              ./*.pkg.tar.zst \
-              ALL_SHA256SUMS
+              --notes-file RELEASE_NOTES.md
           fi
+          cd dist
+          gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber \
+            hotspotctl-x86_64-linux hotspotctl.service ./*.pkg.tar.zst ALL_SHA256SUMS

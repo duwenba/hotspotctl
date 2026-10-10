@@ -1,7 +1,7 @@
 # Maintainer: Du Wenba <2275317692@qq.com>
 # 本地源码打包: 在仓库根目录执行 `makepkg -f` 生成软件包, `pacman -U` 安装。
 pkgname=hotspotctl
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc='Linux 便携热点管理器 (NetworkManager + UFW, Rust TUI/CLI)'
 arch=(x86_64)

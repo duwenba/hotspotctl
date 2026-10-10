@@ -36,7 +36,7 @@ ln -s "$PWD/target/release/hotspotctl" ~/.local/bin/hotspotctl
 
 ```bash
 # Arch Linux: 直接装包(自带 /usr/bin/hotspotctl 与 systemd 单元)
-pacman -U hotspotctl-0.1.0-1-x86_64.pkg.tar.zst
+pacman -U hotspotctl-*.pkg.tar.zst
 
 # 其他发行版: 下载裸二进制(校验完整性后放入 PATH)
 sha256sum -c ALL_SHA256SUMS --ignore-missing

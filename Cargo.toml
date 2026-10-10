@@ -1,6 +1,6 @@
 [package]
 name = "hotspotctl"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Linux 便携热点管理器 (NetworkManager + UFW, Rust TUI/CLI)"
 repository = "https://github.com/duwenba/hotspotctl"

@@ -31,7 +31,7 @@ pub struct Status {
 impl Status {
     /// 热点是否处于运行中。
     pub fn running(&self) -> bool {
-        matches!(self.conn.as_deref(), Some(_))
+        self.conn.as_deref().is_some()
             && matches!(self.state.as_deref(), Some("connected") | Some("已连接"))
     }
 
@@ -84,7 +84,7 @@ pub fn collect_status() -> Status {
         None => Vec::new(),
     };
 
-    let password = conn.as_deref().map(get_password).flatten();
+    let password = conn.as_deref().and_then(get_password);
 
     Status {
         wlan,

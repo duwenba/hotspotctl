@@ -162,13 +162,7 @@ pub fn do_on(ssid: Option<&str>, password: Option<&str>) -> bool {
     } else if p.stderr.contains("mismatching interface name") {
         // 连接绑定在旧接口名上(如接口改名/残留连接), 重绑到当前接口后重试。
         log::warn("连接绑定的接口名与当前不符, 重新绑定后重试...");
-        let fix = [
-            "con",
-            "modify",
-            &conn,
-            "connection.interface-name",
-            &wlan,
-        ];
+        let fix = ["con", "modify", &conn, "connection.interface-name", &wlan];
         if run("nmcli", &fix).check(&fix).is_err() {
             log::fail("重新绑定接口名失败");
             return false;

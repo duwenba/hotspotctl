@@ -78,4 +78,3 @@ Hyprland 桌面会弹 polkit 密码窗,输入一次即可。(符合本机「用 
 - `nmcli -t -f` 单字段带前缀 → 改 `-g`
 - `channel 0` 非法 → 空字符串
 - `nmcli` 隐藏 psk → keyfile 兜底
->>>>>>> conflict 1 of 1 ends

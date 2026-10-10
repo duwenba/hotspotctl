@@ -19,13 +19,29 @@ Linux 本身支持热点(NetworkManager + hostapd 底层),但有三道常见的�
 
 ## 构建与安装
 
-
+```bash
 # 构建(需 Rust 工具链)
 cargo build --release        # 产物: target/release/hotspotctl
 
 # 加入 PATH(可选, 之后任意目录可调)
 ln -s "$PWD/target/release/hotspotctl" ~/.local/bin/hotspotctl
 ```
+
+### 免构建安装(下载预编译产物)
+
+每次推送 `v*` tag 都会由 GitHub Actions 自动构建并发布到 Releases:
+
+```bash
+# Arch Linux: 直接装包(自带 /usr/bin/hotspotctl 与 systemd 单元)
+pacman -U hotspotctl-0.1.0-1-x86_64.pkg.tar.zst
+
+# 其他发行版: 下载裸二进制(校验完整性后放入 PATH)
+sha256sum -c ALL_SHA256SUMS --ignore-missing
+install -Dm755 hotspotctl-x86_64-linux ~/.local/bin/hotspotctl
+```
+
+> 二进制为动态链接的 x86_64 ELF,依赖 glibc 与系统工具 `nmcli`/`ufw`/`iw`/`rfkill`。
+> Arch 包在 `archlinux:base-devel` 容器中由 `makepkg` 构建,不依赖本机环境。
 
 ## systemd 服务管理
 

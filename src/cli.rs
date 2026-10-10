@@ -124,8 +124,7 @@ fn print_status(st: &status::Status) {
     println!("{}", c(log::C_BOLD, "══════════ 热点状态 ══════════"));
     if st.running() {
         println!(
-            "{} {}  热点 {}",
-            "  连接:    ",
+            "  连接:     {}  热点 {}",
             c(log::C_GREEN, "运行中"),
             st.ssid.as_deref().unwrap_or("")
         );
@@ -140,8 +139,7 @@ fn print_status(st: &status::Status) {
         );
     } else {
         println!(
-            "{} {}  (可用 hotspotctl on 开启)",
-            "  连接:    ",
+            "  连接:     {}  (可用 hotspotctl on 开启)",
             c(log::C_RED, "未运行")
         );
     }
@@ -251,8 +249,8 @@ fn cmd_devices() {
         return;
     }
     println!(
-        "{:<20}{:<17}{:<14}{:<10}{:<12}{}",
-        "MAC 地址", "IP", "主机名", "信号", "上行", "下行"
+        "{:<20}{:<17}{:<14}{:<10}{:<12}下行",
+        "MAC 地址", "IP", "主机名", "信号", "上行"
     );
     for s in &stations {
         print_row(s, &leases);

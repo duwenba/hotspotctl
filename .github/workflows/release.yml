@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 校验 tag 与 Cargo.toml / PKGBUILD 里的版本一致,避免发布错版本。
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          pkgver="$(sed -n 's/^pkgver=\(.*\)/\1/p' PKGBUILD | head -1)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Cargo.toml=$version  PKGBUILD=$pkgver"
+          if [ "$version" != "$pkgver" ]; then
+            echo "::error::Cargo.toml ($version) 与 PKGBUILD ($pkgver) 版本不一致"
+            exit 1
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} 与版本 v$version 不匹配"
+            exit 1
+          fi
+
+  # 裸二进制 (x86_64-unknown-linux-gnu)
+  binary:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          install -Dm755 target/release/hotspotctl dist/hotspotctl-x86_64-linux
+          install -Dm644 packaging/hotspotctl.service dist/hotspotctl.service
+          cd dist && sha256sum hotspotctl-x86_64-linux hotspotctl.service > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary
+          path: dist/*
+          if-no-files-found: error
+
+  # Arch Linux 包 (makepkg)。在 archlinux 容器里构建,以非 root 用户执行 makepkg。
+  arch-package:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build package
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD":/src -w /src archlinux:base-devel bash -euo pipefail -c '
+            pacman -Syu --noconfirm --needed base-devel rust
+            useradd -m builder
+            chown -R builder /src
+            su builder -c "makepkg -f --noconfirm"
+          '
+          ls -l ./*.pkg.tar.zst
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: "*.pkg.tar.zst"
+          if-no-files-found: error
+
+  release:
+    needs: [preflight, binary, arch-package]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Collect checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          ls -l
+          sha256sum ./*.pkg.tar.zst | sed 's|\./||' > SHA256SUMS.arch
+          cat SHA256SUMS SHA256SUMS.arch > ALL_SHA256SUMS
+          cat ALL_SHA256SUMS
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd dist
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "hotspotctl ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            hotspotctl-x86_64-linux \
+            hotspotctl.service \
+            ./*.pkg.tar.zst \
+            ALL_SHA256SUMS

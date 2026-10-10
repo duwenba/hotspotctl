@@ -1,0 +1,20 @@
+[Unit]
+Description=hotspotctl - Linux 便携热点管理器 (NetworkManager + UFW)
+Documentation=file:///usr/share/doc/hotspotctl/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/hotspotctl on
+ExecStop=/usr/bin/hotspotctl off
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=180
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

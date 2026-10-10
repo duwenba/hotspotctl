@@ -646,7 +646,7 @@ impl App {
             if i > 0 {
                 spans.push(Span::styled(" · ", Style::default().fg(BORDER)));
             }
-            spans.push(Span::styled(format!("{key}"), Style::default().fg(ACCENT)));
+            spans.push(Span::styled(key.to_string(), Style::default().fg(ACCENT)));
             spans.push(Span::styled(
                 format!(" {desc}"),
                 Style::default().fg(Color::White),
@@ -922,7 +922,7 @@ mod tests {
         for y in 0..area.height {
             let mut row = String::new();
             for x in 0..area.width {
-                row.push_str(&buf.cell((x, y)).map(|c| c.symbol()).unwrap_or(""));
+                row.push_str(buf.cell((x, y)).map(|c| c.symbol()).unwrap_or(""));
             }
             println!("{:>3} {}", y, row);
         }

@@ -2,6 +2,11 @@
 name = "hotspotctl"
 version = "0.1.0"
 edition = "2021"
+description = "Linux 便携热点管理器 (NetworkManager + UFW, Rust TUI/CLI)"
+repository = "https://github.com/duwenba/hotspotctl"
+authors = ["Du Wenba <2275317692@qq.com>"]
+keywords = ["hotspot", "networkmanager", "tui", "cli"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "hotspotctl"

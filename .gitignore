@@ -3,5 +3,6 @@ __pycache__/
 .venv/
 target
 pkg/
+dist/
 *.pkg.tar.zst
 *.tar.zst

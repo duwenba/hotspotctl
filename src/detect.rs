@@ -247,6 +247,7 @@ pub fn get_password(conn: &str) -> Option<String> {
     if !s.is_empty() && s != "<hidden>" {
         return Some(s.to_string());
     }
+    let re = regex::Regex::new(r"(?m)^psk=(.+)$").unwrap();
     for path in [
         format!("/etc/NetworkManager/system-connections/{conn}.nmconnection"),
         format!("/etc/NetworkManager/system-connections/{conn}"),
@@ -254,7 +255,6 @@ pub fn get_password(conn: &str) -> Option<String> {
         let Ok(contents) = fs::read_to_string(&path) else {
             continue;
         };
-        let re = regex::Regex::new(r"(?m)^psk=(.+)$").unwrap();
         if let Some(cap) = re.captures(&contents) {
             return cap.get(1).map(|m| m.as_str().to_string());
         }

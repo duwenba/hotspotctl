@@ -17,6 +17,7 @@ Linux 本身支持热点(NetworkManager + hostapd 底层),但有三道常见的�
 | rfkill 软屏蔽 | Wi-Fi 显示「不可用」，热点入口消失 | `rfkill unblock wlan` |
 | UFW `deny (incoming)` 丢弃 DHCP | 手机卡在「获取 IP 地址」 | 放行 67/udp 与热点子网 |
 | `ip_forward=0` | 拿到 IP 也无法共享上网 | 开启并持久化转发 |
+| TUN 代理劫持默认路由 | 手机连上、拿到 IP，仍提示「无法访问互联网」 | 探测物理上游 + 对 tun 出口单独放行 |
 
 `hotspotctl on` 会自动检测并修复以上所有问题，然后开启热点。
 
@@ -112,14 +113,18 @@ hotspotctl tui        # 显式进入 TUI 界面
 hotspotctl on
   ├─ fix_rfkill()      # 检查/解除 rfkill 软屏蔽
   ├─ fix_ip_forward()  # 写入 /etc/sysctl.d/99-hotspot.conf + sysctl -w
-  ├─ fix_ufw()         # 幂等添加 3 条 UFW 规则:
-  │   ├─ ufw allow in on wlan0 to any port 67 proto udp   (DHCP)
-  │   ├─ ufw allow in on wlan0 from 10.42.0.0/24          (子网)
-  │   └─ ufw route allow in on wlan0 out on <上游接口>      (转发)
+  ├─ fix_ufw()         # 幂等添加 UFW 规则(逐条按 接口/出口 校验, 缺哪条补哪条):
+  │   ├─ ufw allow in on <wl> to any port 67 proto udp   (DHCP, 否则拿不到 IP)
+  │   ├─ ufw allow in on <wl> from 10.42.0.0/24          (子网/DNS, 否则解析不了域名)
+  │   └─ ufw route allow in on <wl> out on <出口>         (转发, 每个出口一条)
   └─ nmcli connection up <热点连接>   # 找不到时自动创建
 ```
 
-- NAT/转发由 NetworkManager 自动管理(`nm-shared-wlan0` 表,MASQUERADE + FORWARD)
+- 接口名运行时探测(`nmcli`, 回退 `/sys/class/net` 的 `wl*`),探测失败直接报错 ——
+  不再回退硬编码 `wlan0`(那只是内核初始名,开机会被 udev 改成 `wlpXsY`)
+- 上游接口自动检测(`ip route get 1.1.1.1`),换网卡不用改配置;
+  若默认路由被 TUN 代理劫持,会跳过 tun 回退查 `main` 表,**并对物理口与 tun 各放行一条转发**
+- NAT/转发由 NetworkManager 自动管理(`nm-shared-<wl>` 表,MASQUERADE + FORWARD)
 - UFW 规则、sysctl 配置均持久化,重启后仍有效
 - 上游接口自动检测(`ip route get 1.1.1.1`),换网卡不用改配置
 - 非 root 时通过 `run0` 自动以 root 重执行自身(桌面弹 polkit 密码窗)
@@ -142,6 +147,12 @@ src/
 
 ## 常见问题
 
+- **手机连上但提示「无法访问互联网」**：先看内核日志
+  `sudo journalctl -k | grep 'UFW BLOCK' | grep 'SRC=10\.42\.'`。若看到
+  `IN=<wl> OUT=Meta`（或你的 tun 设备名），说明 TUN 代理把转发流量吸进了 tun，
+  而防火墙只放行了物理出口。`hotspotctl fix` 现在会自动补上 tun 出口的转发规则；
+  也可手动 `sudo ufw route allow in on <wl> out on <tun>`。
+  若 `OUT=` 为空、`DPT=53`，则是缺子网放行规则，`sudo ufw allow in on <wl> from 10.42.0.0/24`。
 - **重启后 Wi-Fi 又「不可用」**：rfkill 软屏蔽在部分笔记本(如联想)上会随开机重置，
   再跑一次 `hotspotctl fix` 或 `hotspotctl on` 即可；可考虑 BIOS 里关闭飞行模式。
 - **手机连上但网速慢**：信道自动选择可能落在拥挤信道，用 `config --band 2.4` 固定到 2.4G。

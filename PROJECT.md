@@ -67,7 +67,11 @@ Hyprland 桌面会弹 polkit 密码窗,输入一次即可。(符合本机「用 
 
 ## 维护与扩展
 
-- 上游接口、Wi-Fi 接口均为运行时探测;`WLAN_DEFAULT` / `SUBNET` / 连接名是常量可调(`detect.rs`)
+- 上游接口、Wi-Fi 接口均为运行时探测;`SUBNET` / 连接名是常量可调(`detect.rs`)
+- 接口名探测失败直接报错,**不再回退硬编码 `wlan0`**: 那只是内核初始名,开机会被 udev
+  按可预测命名策略改成 `wlpXsY`,写进防火墙规则就是死规则
+- 开了 Clash/mihomo 之类 TUN 代理时,`upstream_iface()` 会跳过 tun 设备回退查 main 表,
+  并对 TUN 出口单独放行(`forward_targets()`),否则策略路由把转发流量吸进 tun 后全被 DROP
 - 若迁移 firewalld: 替换 `actions::fix_ufw()` 中 `ufw ...` 为对应 `firewall-cmd --add-*`
 - 若用 hostapd 手动方案(非 NM): 保留 `fix_rfkill` / `fix_ip_forward` 即可
 - 解析逻辑集中在 `detect.rs` 并带单元测试,新增系统命令在此扩展

@@ -241,7 +241,10 @@ fn cmd_config(
 }
 
 fn cmd_devices() {
-    let wlan = detect::wlan_iface();
+    let Ok(wlan) = detect::wlan_iface() else {
+        crate::log::fail("未找到无线网卡");
+        return;
+    };
     let leases = detect::get_leases();
     let stations = detect::parse_stations(&wlan);
     if stations.is_empty() {

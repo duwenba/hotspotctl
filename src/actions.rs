@@ -57,62 +57,65 @@ pub fn fix_ip_forward() -> Result<(), String> {
     Ok(())
 }
 
-/// 计算某条 UFW 规则是否已存在(与 status.rs 同一套匹配逻辑)。
-fn ufw_rule_exists(st: &str, needle: &str, wlan: &str) -> bool {
-    let subnet = detect::SUBNET;
-    if needle.contains(subnet) {
-        st.lines().any(|l| l.contains(subnet))
-    } else if needle.starts_with("ALLOW") {
-        st.lines()
-            .any(|l| l.contains("ALLOW FWD") && l.contains(wlan))
-    } else {
-        st.contains(needle)
+/// 转发放行的出口接口列表: 物理上游 + (若开着 TUN 代理)虚拟接口。
+/// TUN 代理的策略路由会把**所有**转发流量吸进 tun, 只放行物理口等于全部 DROP。
+pub fn forward_targets() -> Vec<String> {
+    let mut outs = vec![detect::upstream_iface()];
+    if let Some(tun) = detect::tun_iface() {
+        if !outs.contains(&tun) {
+            outs.push(tun);
+        }
     }
+    outs.retain(|s| !s.is_empty());
+    outs
 }
 
-/// 幂等添加 UFW 规则。
-pub fn fix_ufw(wlan: &str, up: &str) -> Result<(), String> {
+/// 幂等添加 UFW 规则(逐条按 接口/QoS 校验是否已存在)。
+pub fn fix_ufw(wlan: &str, outs: &[String]) -> Result<(), String> {
+    use detect::UfwRuleKind;
+
     let mut st = detect::ufw_status_text();
     if !st.contains("Status: active") {
         log::warn("UFW 未启用, 启用...");
         run("ufw", &["enable"]).check(&["ufw", "enable"])?;
         st = detect::ufw_status_text();
     }
-    let rules: [(&str, &str, &str); 3] = [
-        (
-            &format!("67/udp on {wlan}"),
-            "allow",
-            &format!("in on {wlan} to any port 67 proto udp"),
-        ),
-        (
-            &format!("ALLOW IN {}", detect::SUBNET),
-            "allow",
-            &format!("in on {wlan} from {}", detect::SUBNET),
-        ),
-        (
-            "ALLOW FWD",
-            "route",
-            &format!("allow in on {wlan} out on {up}"),
-        ),
-    ];
-    for (needle, kind, rule) in rules {
-        let exists = ufw_rule_exists(&st, needle, wlan);
-        let desc = match needle {
-            n if n.contains(detect::SUBNET) => "子网放行",
-            n if n.starts_with("ALLOW") => "转发放行",
-            _ => "DHCP 放行",
-        };
-        if exists {
-            log::ok(&format!("{desc}: 已存在"));
-        } else {
-            log::warn(&format!("{desc}: 添加 UFW 规则..."));
-            let argv: Vec<&str> = rule.split_whitespace().collect();
-            let mut full: Vec<&str> = Vec::with_capacity(argv.len() + 1);
-            full.push(kind);
-            full.extend(argv);
-            run("ufw", &full).check(&full)?;
-            log::ok(&format!("{desc}: 已添加"));
+
+    // 1. DHCP: 手机拿 IP 的前提。
+    if detect::ufw_has_rule(&st, UfwRuleKind::Dhcp, wlan, None) {
+        log::ok("DHCP 放行: 已存在");
+    } else {
+        log::warn("DHCP 放行: 添加 UFW 规则...");
+        let argv = ["allow", "in", "on", wlan, "to", "any", "port", "67", "proto", "udp"];
+        run("ufw", &argv).check(&argv)?;
+        log::ok("DHCP 放行: 已添加");
+        st = detect::ufw_status_text();
+    }
+
+    // 2. 子网: dnsmasq 的 53/udp 走 INPUT 链, 不放行则手机能连上但解析不了域名。
+    if detect::ufw_has_rule(&st, UfwRuleKind::Subnet, wlan, None) {
+        log::ok("子网放行: 已存在");
+    } else {
+        log::warn("子网放行: 添加 UFW 规则...");
+        let argv = ["allow", "in", "on", wlan, "from", detect::SUBNET];
+        run("ufw", &argv).check(&argv)?;
+        log::ok("子网放行: 已添加");
+        st = detect::ufw_status_text();
+    }
+
+    // 3. 转发: 每个可能的出口各一条。
+    for out in outs {
+        if detect::ufw_has_rule(&st, UfwRuleKind::Forward, wlan, Some(out)) {
+            log::ok(&format!("转发放行 → {out}: 已存在"));
+            continue;
         }
+        log::warn(&format!("转发放行 → {out}: 添加 UFW 规则..."));
+        let argv = [
+            "route", "allow", "in", "on", wlan, "out", "on", out.as_str(),
+        ];
+        run("ufw", &argv).check(&argv)?;
+        log::ok(&format!("转发放行 → {out}: 已添加"));
+        st = detect::ufw_status_text();
     }
     Ok(())
 }
@@ -123,9 +126,14 @@ pub fn do_on(ssid: Option<&str>, password: Option<&str>) -> bool {
         return false;
     }
     let _ = fix_ip_forward();
-    let wlan = detect::wlan_iface();
-    let up = detect::upstream_iface();
-    let _ = fix_ufw(&wlan, &up);
+    let wlan = match detect::wlan_iface() {
+        Ok(w) => w,
+        Err(e) => {
+            log::fail(&e);
+            return false;
+        }
+    };
+    let _ = fix_ufw(&wlan, &forward_targets());
 
     // NM shared 模式依赖 dnsmasq 提供 DHCP/DNS, 缺失时激活会以
     // "IP configuration could not be reserved" 之类晦涩错误失败, 提前拦截。
@@ -208,10 +216,16 @@ pub fn do_off() {
 
 /// 一键修复。
 pub fn do_fix() {
-    let ok_ = fix_rfkill().is_ok();
-    let _ = fix_ip_forward();
-    let _ = fix_ufw(&detect::wlan_iface(), &detect::upstream_iface());
-    if ok_ {
+    let mut all_ok = fix_rfkill().is_ok();
+    all_ok &= fix_ip_forward().is_ok();
+    match detect::wlan_iface() {
+        Ok(wlan) => all_ok &= fix_ufw(&wlan, &forward_targets()).is_ok(),
+        Err(e) => {
+            log::fail(&e);
+            all_ok = false;
+        }
+    }
+    if all_ok {
         log::ok("全部检查通过, 可以开启热点");
     }
 }

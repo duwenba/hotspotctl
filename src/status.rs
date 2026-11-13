@@ -55,22 +55,21 @@ pub fn collect_status() -> Status {
     let ufw_text = ufw_status_text();
     let ufw_active = ufw_text.contains("Status: active");
 
-    // 匹配 UFW 规则 (按行+特征串, 与脚本一致)。
+    // 匹配 UFW 规则: 必须带接口名比对, 否则改名前的旧规则会顶替新规则。
+    // 转发规则有多个可能出口(物理上游 + TUN 代理), 任一存在即视为已放行。
     let mut rules = Vec::new();
-    let wlan_str = wlan.as_deref().unwrap_or(WLAN_DEFAULT);
-    for (needle, desc) in [
-        (format!("67/udp on {wlan_str}"), "DHCP 放行"),
-        (format!("ALLOW IN {SUBNET}"), "子网放行"),
-        ("ALLOW FWD".to_string(), "转发放行"),
+    let wlan_str = wlan.as_deref().unwrap_or_default();
+    let outs = crate::actions::forward_targets();
+    for (kind, desc) in [
+        (UfwRuleKind::Dhcp, "DHCP 放行"),
+        (UfwRuleKind::Subnet, "子网放行"),
+        (UfwRuleKind::Forward, "转发放行"),
     ] {
-        let found = if needle.contains(SUBNET) {
-            ufw_text.lines().any(|l| l.contains(SUBNET))
-        } else if needle.starts_with("ALLOW") {
-            ufw_text
-                .lines()
-                .any(|l| l.contains("ALLOW FWD") && l.contains(wlan_str))
+        let found = if kind == UfwRuleKind::Forward {
+            outs.iter()
+                .any(|o| ufw_has_rule(&ufw_text, kind, wlan_str, Some(o)))
         } else {
-            ufw_text.contains(&needle)
+            ufw_has_rule(&ufw_text, kind, wlan_str, None)
         };
         rules.push(UfwRule {
             desc: desc.to_string(),

@@ -86,7 +86,9 @@ pub fn fix_ufw(wlan: &str, outs: &[String]) -> Result<(), String> {
         log::ok("DHCP 放行: 已存在");
     } else {
         log::warn("DHCP 放行: 添加 UFW 规则...");
-        let argv = ["allow", "in", "on", wlan, "to", "any", "port", "67", "proto", "udp"];
+        let argv = [
+            "allow", "in", "on", wlan, "to", "any", "port", "67", "proto", "udp",
+        ];
         run("ufw", &argv).check(&argv)?;
         log::ok("DHCP 放行: 已添加");
         st = detect::ufw_status_text();
@@ -111,7 +113,14 @@ pub fn fix_ufw(wlan: &str, outs: &[String]) -> Result<(), String> {
         }
         log::warn(&format!("转发放行 → {out}: 添加 UFW 规则..."));
         let argv = [
-            "route", "allow", "in", "on", wlan, "out", "on", out.as_str(),
+            "route",
+            "allow",
+            "in",
+            "on",
+            wlan,
+            "out",
+            "on",
+            out.as_str(),
         ];
         run("ufw", &argv).check(&argv)?;
         log::ok(&format!("转发放行 → {out}: 已添加"));

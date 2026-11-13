@@ -428,7 +428,10 @@ mod tests {
             Some("Meta".to_string())
         );
         // 无路由。
-        assert_eq!(parse_route_dev("RTNETLINK answers: Network is unreachable"), None);
+        assert_eq!(
+            parse_route_dev("RTNETLINK answers: Network is unreachable"),
+            None
+        );
     }
 
     #[test]
@@ -449,9 +452,19 @@ Anywhere on wlp0s20f3      ALLOW FWD   Anywhere on Meta
         // 新接口: 三类规则都该判定为已存在, 不能被子网串误判。
         assert!(ufw_has_rule(st, UfwRuleKind::Dhcp, "wlp0s20f3", None));
         assert!(ufw_has_rule(st, UfwRuleKind::Subnet, "wlp0s20f3", None));
-        assert!(ufw_has_rule(st, UfwRuleKind::Forward, "wlp0s20f3", Some("Meta")));
+        assert!(ufw_has_rule(
+            st,
+            UfwRuleKind::Forward,
+            "wlp0s20f3",
+            Some("Meta")
+        ));
         // 出口不同则必须判为缺失(旧逻辑只看入接口, 会把 out enp44s0 当成已放行)。
-        assert!(!ufw_has_rule(st, UfwRuleKind::Forward, "wlp0s20f3", Some("enp44s0")));
+        assert!(!ufw_has_rule(
+            st,
+            UfwRuleKind::Forward,
+            "wlp0s20f3",
+            Some("enp44s0")
+        ));
         // 旧接口名不应再被认为覆盖了新接口。
         assert!(!ufw_has_rule(st, UfwRuleKind::Subnet, "wlp9s9f9", None));
         // 空接口名一律视为缺失, 避免写出 "in on  ..." 这种垃圾规则。

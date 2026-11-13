@@ -6,3 +6,6 @@ pkg/
 dist/
 *.pkg.tar.zst
 *.tar.zst
+
+# 编辑器/agent 工作区数据
+.workbuddy/

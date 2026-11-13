@@ -1,0 +1,200 @@
+name: Release
+
+# 推 v* tag 即自动构建并发布；也可在 Actions 页面手动重发某个已有 tag 的产物。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "已存在的 tag，如 v0.1.2（用于重跑或补传产物）"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 校验 tag 与 Cargo.toml / PKGBUILD 里的版本一致，避免发布错版本。
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - id: ver
+        name: Check version consistency
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag || '' }}"
+          [ -n "$tag" ] || tag="${GITHUB_REF_NAME}"
+
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          pkgver="$(sed -n 's/^pkgver=\(.*\)/\1/p' PKGBUILD | head -1)"
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag  Cargo.toml=$version  PKGBUILD=$pkgver"
+
+          if [ "$version" != "$pkgver" ]; then
+            echo "::error::Cargo.toml ($version) 与 PKGBUILD ($pkgver) 版本不一致"
+            exit 1
+          fi
+          if [ "$tag" != "v$version" ]; then
+            echo "::error::tag ($tag) 与版本 (v$version) 不匹配"
+            exit 1
+          fi
+
+  # 裸二进制 (x86_64-unknown-linux-gnu)
+  binary:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          install -Dm755 target/release/hotspotctl dist/hotspotctl-x86_64-linux
+          install -Dm644 packaging/hotspotctl.service dist/hotspotctl.service
+          cd dist && sha256sum hotspotctl-x86_64-linux hotspotctl.service > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary
+          path: dist/*
+          if-no-files-found: error
+
+  # Arch Linux 包 (makepkg)。在 archlinux 容器里构建，以非 root 用户执行 makepkg。
+  arch-package:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.tag }}
+
+      - name: Build package
+        # --nodeps: 容器里不安装 networkmanager/ufw/iw 等运行期依赖，只构建包。
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD":/src -w /src archlinux:base-devel bash -euo pipefail -c '
+            pacman -Syu --noconfirm --needed base-devel rust
+            useradd -m builder
+            chown -R builder /src
+            su builder -c "makepkg -f --noconfirm --nodeps"
+          '
+          ls -l ./*.pkg.tar.zst
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: "hotspotctl-[0-9]*.pkg.tar.zst"
+          if-no-files-found: error
+
+  release:
+    needs: [preflight, binary, arch-package]
+    if: needs.preflight.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # fetch-depth: 0 才能列出所有 tag，用于生成 changelog。
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.tag }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Collect checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          ls -l
+          sha256sum ./*.pkg.tar.zst | sed 's|\./||' > SHA256SUMS.arch
+          cat SHA256SUMS SHA256SUMS.arch > ALL_SHA256SUMS
+          cat ALL_SHA256SUMS
+
+      # 本项目直接往 main 上提交（不走 PR），GitHub 自动生成的 notes 基本是空的，
+      # 所以自己按 tag 区间生成 release notes。
+      - name: Build release notes
+        env:
+          TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          prev="$(git tag --list 'v*' --sort=-v:refname | grep -vx "$TAG" | head -1 || true)"
+          {
+            if [ -n "$prev" ]; then
+              echo "## 变更 (${prev} → ${TAG})"
+              echo
+              git log --no-merges --pretty='- %s (`%h`)' "${prev}..${TAG}"
+              echo
+              echo "**完整变更**: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${prev}...${TAG}"
+            else
+              echo "## 首个版本 ${TAG}"
+            fi
+            echo
+            echo '## 安装'
+            echo
+            echo '```bash'
+            echo 'sha256sum -c ALL_SHA256SUMS'
+            echo 'pacman -U hotspotctl-*.pkg.tar.zst                        # Arch (含 systemd 单元)'
+            echo 'install -Dm755 hotspotctl-x86_64-linux ~/.local/bin/hotspotctl   # 其他发行版'
+            echo '```'
+            echo
+            echo '## ⚠️ AI 使用声明'
+            echo
+            echo '**本项目代码主要由 AI 生成，作者仅做集成与测试。不对正确性、安全性作任何担保；使用风险自负。**'
+            echo
+            echo '本工具会以 **root 权限修改系统状态**（`rfkill`、`/etc/sysctl.d/*.conf`、UFW 防火墙规则、NetworkManager 连接配置），'
+            echo '请先阅读仓库 README 中的完整声明与源码后再决定是否使用。'
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release 已存在，更新说明并覆盖上传产物"
+            gh release edit "$TAG" --repo "${GITHUB_REPOSITORY}" --notes-file RELEASE_NOTES.md
+          else
+            gh release create "$TAG" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "hotspotctl ${TAG}" \
+              --notes-file RELEASE_NOTES.md
+          fi
+          cd dist
+          gh release upload "$TAG" --repo "${GITHUB_REPOSITORY}" --clobber \
+            hotspotctl-x86_64-linux hotspotctl.service ./*.pkg.tar.zst ALL_SHA256SUMS
